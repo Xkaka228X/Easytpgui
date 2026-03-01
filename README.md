@@ -4,26 +4,45 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local FileName = "Navigator_Fixed_Final.json"
 
-local function save(d) writefile(FileName, HttpService:JSONEncode(d)) end
+local function save(d) pcall(function() writefile(FileName, HttpService:JSONEncode(d)) end) end
 local function load() return isfile(FileName) and HttpService:JSONDecode(readfile(FileName)) or {} end
 local locations = load()
 
 local beacons = {}
-local moveMode = "TP" -- Режим по умолчанию: TP или Fly
+local moveMode = "TP" 
 local isMoving = false
 
--- ФУНКЦИЯ ПЛАВНОГО ПЕРЕМЕЩЕНИЯ (FLY)
+-- ПЛАВНЫЙ ДРАГ (ЗАМЕНА УСТАРЕВШЕМУ .DRAGGABLE)
+local function makeDraggable(obj)
+    local dragging, dragInput, dragStart, startPos
+    obj.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position; startPos = obj.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            obj.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+end
+
+-- ПЕРЕМЕЩЕНИЕ
 local function flyTo(targetPos)
     local char = LP.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp or isMoving then return end
 
     if moveMode == "TP" then
-        hrp.CFrame = CFrame.new(targetPos)
+        hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
     else
         isMoving = true
         local dist = (hrp.Position - targetPos).Magnitude
-        local speed = 150 -- Скорость полета
+        local speed = 150 
         
         local bv = Instance.new("BodyVelocity", hrp)
         bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
@@ -36,13 +55,13 @@ local function flyTo(targetPos)
         local tween = TweenService:Create(hrp, TweenInfo.new(dist/speed, Enum.EasingStyle.Linear), {CFrame = CFrame.new(targetPos)})
         tween:Play()
         tween.Completed:Connect(function()
-            bv:Destroy() bg:Destroy()
+            bv:Destroy(); bg:Destroy()
             isMoving = false
         end)
     end
 end
 
--- ФУНКЦИЯ СКВОЗНОГО СТОЛБА
+-- МАЯКИ (СТОЛБЫ)
 local function createVisuals(name, coordsStr)
     if beacons[name] then beacons[name]:Destroy() end
     local t = {} for s in coordsStr:gmatch("[^,]+") do table.insert(t, tonumber(s)) end
@@ -61,8 +80,7 @@ local function createVisuals(name, coordsStr)
     beam.Attachment0 = attTop; beam.Attachment1 = attBottom
     beam.Width0 = 3; beam.Width1 = 3
     beam.Color = ColorSequence.new(Color3.fromRGB(0, 255, 100))
-    beam.Transparency = NumberSequence.new(0.5)
-    beam.LightEmission = 1; beam.FaceCamera = true
+    beam.Transparency = NumberSequence.new(0.5); beam.LightEmission = 1; beam.FaceCamera = true
 
     local anchor = Instance.new("Part", folder)
     anchor.Anchored = true; anchor.CanCollide = false; anchor.Transparency = 1; anchor.Position = pos
@@ -72,8 +90,7 @@ local function createVisuals(name, coordsStr)
 
     local label = Instance.new("TextLabel", bgui)
     label.Size = UDim2.new(1, 0, 1, 0); label.BackgroundTransparency = 1
-    label.TextColor3 = Color3.fromRGB(255, 255, 255); label.TextSize = 16
-    label.Font = Enum.Font.SourceSansBold
+    label.TextColor3 = Color3.fromRGB(255, 255, 255); label.TextSize = 16; label.Font = Enum.Font.SourceSansBold
 
     task.spawn(function()
         while folder.Parent do
@@ -94,38 +111,49 @@ local function refreshBeacons()
     for n, c in pairs(locations) do createVisuals(n, c) end
 end
 
--- UI ОСНОВА
+-- UI
 local Screen = Instance.new("ScreenGui", game:GetService("CoreGui"))
+Screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
+-- КНОПКА-ВИДЖЕТ (КАК НА КАРТИНКЕ)
+local function createQuickButton(name, targetPos)
+    local QuickBtn = Instance.new("Frame", Screen)
+    QuickBtn.Size = UDim2.new(0, 120, 0, 60)
+    QuickBtn.Position = UDim2.new(0.8, 0, 0.2, 0)
+    QuickBtn.BackgroundColor3 = Color3.fromRGB(180, 180, 180)
+    QuickBtn.BorderSizePixel = 2; QuickBtn.ZIndex = 100
+    makeDraggable(QuickBtn)
+
+    local RedPart = Instance.new("TextButton", QuickBtn)
+    RedPart.Size = UDim2.new(0.7, -4, 1, -8); RedPart.Position = UDim2.new(0, 4, 0, 4)
+    RedPart.BackgroundColor3 = Color3.fromRGB(255, 0, 0); RedPart.Text = "TP"
+    RedPart.TextColor3 = Color3.fromRGB(180, 160, 255); RedPart.Font = Enum.Font.GothamBlack; RedPart.TextSize = 35
+    RedPart.BorderSizePixel = 3; RedPart.BorderColor3 = Color3.fromRGB(150, 0, 0); RedPart.ZIndex = 101
+
+    local Icon = Instance.new("TextLabel", QuickBtn)
+    Icon.Size = UDim2.new(0.3, 0, 1, 0); Icon.Position = UDim2.new(0.7, 0, 0, 0)
+    Icon.BackgroundTransparency = 1; Icon.Text = "⇆"; Icon.TextColor3 = Color3.new(0,0,0)
+    Icon.TextSize = 25; Icon.ZIndex = 101
+
+    local Close = Instance.new("TextButton", QuickBtn)
+    Close.Size = UDim2.new(0, 16, 0, 16); Close.Position = UDim2.new(1, -16, 0, 0)
+    Close.BackgroundColor3 = Color3.fromRGB(200, 50, 50); Close.Text = "x"; Close.TextColor3 = Color3.new(1,1,1); Close.ZIndex = 105
+
+    RedPart.MouseButton1Click:Connect(function() flyTo(targetPos) end)
+    Close.MouseButton1Click:Connect(function() QuickBtn:Destroy() end)
+end
+
+-- ОСНОВНОЕ ОКНО
 local ToggleBtn = Instance.new("TextButton", Screen)
-ToggleBtn.Size = UDim2.new(0, 50, 0, 30)
-ToggleBtn.Position = UDim2.new(0, 10, 0.5, 0)
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-ToggleBtn.Text = "tp"
-ToggleBtn.TextColor3 = Color3.fromRGB(100, 255, 100)
-ToggleBtn.Font = Enum.Font.SourceSansBold
-ToggleBtn.TextSize = 20; ToggleBtn.BorderSizePixel = 2
-
--- ДРАГ МИНИ КНОПКИ
-local d_drag, d_start, d_pos
-ToggleBtn.InputBegan:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-        d_drag = true; d_start = i.Position; d_pos = ToggleBtn.Position
-        i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then d_drag = false end end)
-    end
-end)
-UserInputService.InputChanged:Connect(function(i)
-    if d_drag and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-        local delta = i.Position - d_start
-        ToggleBtn.Position = UDim2.new(d_pos.X.Scale, d_pos.X.Offset + delta.X, d_pos.Y.Scale, d_pos.Y.Offset + delta.Y)
-    end
-end)
+ToggleBtn.Size = UDim2.new(0, 50, 0, 30); ToggleBtn.Position = UDim2.new(0, 10, 0.5, 0)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60); ToggleBtn.Text = "tp"
+ToggleBtn.TextColor3 = Color3.fromRGB(100, 255, 100); ToggleBtn.TextSize = 20; ToggleBtn.BorderSizePixel = 2
+makeDraggable(ToggleBtn)
 
 local MainFrame = Instance.new("Frame", Screen)
-MainFrame.Size = UDim2.new(0, 450, 0, 320)
-MainFrame.Position = UDim2.new(0.5, -225, 0.5, -160)
-MainFrame.BackgroundColor3 = Color3.fromRGB(180, 180, 180)
-MainFrame.BorderSizePixel = 4; MainFrame.Active = true; MainFrame.Draggable = true
+MainFrame.Size = UDim2.new(0, 450, 0, 320); MainFrame.Position = UDim2.new(0.5, -225, 0.5, -160)
+MainFrame.BackgroundColor3 = Color3.fromRGB(180, 180, 180); MainFrame.BorderSizePixel = 4; MainFrame.ZIndex = 10
+makeDraggable(MainFrame)
 
 ToggleBtn.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFrame.Visible end)
 
@@ -133,16 +161,14 @@ ToggleBtn.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFrame
 local TabBar = Instance.new("Frame", MainFrame)
 TabBar.Size = UDim2.new(1, 0, 0, 40); TabBar.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 
-local function createTabBtn(name, pos)
-    local btn = Instance.new("TextButton", TabBar)
-    btn.Size = UDim2.new(0.5, 0, 1, 0); btn.Position = UDim2.new(pos * 0.5, 0, 0, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(80, 80, 80); btn.Text = name
-    btn.TextColor3 = Color3.fromRGB(100, 255, 100); btn.Font = Enum.Font.SourceSansBold; btn.TextSize = 22
-    return btn
-end
+local btnCords = Instance.new("TextButton", TabBar)
+btnCords.Size = UDim2.new(0.5, 0, 1, 0); btnCords.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+btnCords.Text = "cords"; btnCords.TextColor3 = Color3.fromRGB(100, 255, 100); btnCords.TextSize = 22
 
-local btnCords = createTabBtn("cords", 0)
-local btnSaved = createTabBtn("saved", 1)
+local btnSaved = Instance.new("TextButton", TabBar)
+btnSaved.Size = UDim2.new(0.5, 0, 1, 0); btnSaved.Position = UDim2.new(0.5, 0, 0, 0)
+btnSaved.BackgroundColor3 = Color3.fromRGB(80, 80, 80); btnSaved.Text = "saved"
+btnSaved.TextColor3 = Color3.fromRGB(100, 255, 100); btnSaved.TextSize = 22
 
 local PageCords = Instance.new("Frame", MainFrame)
 PageCords.Size = UDim2.new(1, 0, 1, -40); PageCords.Position = UDim2.new(0, 0, 0, 40); PageCords.BackgroundTransparency = 1
@@ -155,9 +181,8 @@ btnSaved.MouseButton1Click:Connect(function() PageCords.Visible = false; PageSav
 
 --- [ CORDS PAGE ] ---
 local PosShow = Instance.new("TextLabel", PageCords)
-PosShow.Size = UDim2.new(1, 0, 0, 30); PosShow.Position = UDim2.new(0, 0, 0, 5)
-PosShow.BackgroundTransparency = 1; PosShow.TextColor3 = Color3.fromRGB(40, 40, 40)
-PosShow.Font = Enum.Font.SourceSansBold; PosShow.TextSize = 16
+PosShow.Size = UDim2.new(1, 0, 0, 30); PosShow.BackgroundTransparency = 1
+PosShow.TextColor3 = Color3.fromRGB(40, 40, 40); PosShow.TextSize = 16
 
 task.spawn(function()
     while true do
@@ -176,22 +201,24 @@ InputBox.PlaceholderText = "Input X, Y, Z"; InputBox.TextSize = 20
 
 local btnTP = Instance.new("TextButton", PageCords)
 btnTP.Size = UDim2.new(0.2, 0, 0, 45); btnTP.Position = UDim2.new(0.76, 0, 0.15, 0)
-btnTP.BackgroundColor3 = Color3.fromRGB(200, 50, 50); btnTP.Text = "MOVE"; btnTP.TextColor3 = Color3.fromRGB(255, 255, 255); btnTP.TextSize = 20
+btnTP.BackgroundColor3 = Color3.fromRGB(200, 50, 50); btnTP.Text = "MOVE"; btnTP.TextColor3 = Color3.new(1,1,1); btnTP.TextSize = 20
 
-local function createSmallBtn(text, color, x, size)
-    local b = Instance.new("TextButton", PageCords)
-    b.Size = UDim2.new(size, 0, 0, 35); b.Position = UDim2.new(x, 0, 0.4, 0)
-    b.BackgroundColor3 = color; b.Text = text; b.TextColor3 = Color3.fromRGB(255, 255, 255)
-    b.TextSize = 14; b.Font = Enum.Font.SourceSansBold
-    return b
-end
+local bSave = Instance.new("TextButton", PageCords)
+bSave.Size = UDim2.new(0.18, 0, 0, 35); bSave.Position = UDim2.new(0.05, 0, 0.4, 0)
+bSave.BackgroundColor3 = Color3.fromRGB(100, 180, 100); bSave.Text = "save"
 
-local bSave = createSmallBtn("save", Color3.fromRGB(100, 180, 100), 0.05, 0.18)
-local bClean = createSmallBtn("clean", Color3.fromRGB(200, 180, 50), 0.25, 0.18)
-local bMode = createSmallBtn("Mode: TP", Color3.fromRGB(80, 120, 200), 0.45, 0.22)
-local bThis = createSmallBtn("this pos", Color3.fromRGB(200, 100, 100), 0.7, 0.22)
+local bClean = Instance.new("TextButton", PageCords)
+bClean.Size = UDim2.new(0.18, 0, 0, 35); bClean.Position = UDim2.new(0.25, 0, 0.4, 0)
+bClean.BackgroundColor3 = Color3.fromRGB(200, 180, 50); bClean.Text = "clean"
 
--- Логика переключения режима
+local bMode = Instance.new("TextButton", PageCords)
+bMode.Size = UDim2.new(0.22, 0, 0, 35); bMode.Position = UDim2.new(0.45, 0, 0.4, 0)
+bMode.BackgroundColor3 = Color3.fromRGB(80, 120, 200); bMode.Text = "Mode: TP"
+
+local bThis = Instance.new("TextButton", PageCords)
+bThis.Size = UDim2.new(0.22, 0, 0, 35); bThis.Position = UDim2.new(0.7, 0, 0.4, 0)
+bThis.BackgroundColor3 = Color3.fromRGB(200, 100, 100); bThis.Text = "this pos"
+
 bMode.MouseButton1Click:Connect(function()
     moveMode = (moveMode == "TP") and "Fly" or "TP"
     bMode.Text = "Mode: " .. moveMode
@@ -213,45 +240,44 @@ local function updateSavedUI()
         Frame.Size = UDim2.new(1, -10, 0, 60); Frame.BackgroundColor3 = Color3.fromRGB(120, 120, 120)
         
         local editName = Instance.new("TextBox", Frame)
-        editName.Size = UDim2.new(0.6, 0, 0.5, 0); editName.Position = UDim2.new(0.02, 0, 0, 0)
-        editName.Text = name; editName.TextColor3 = Color3.fromRGB(255, 255, 255)
-        editName.BackgroundTransparency = 1; editName.TextXAlignment = Enum.TextXAlignment.Left; editName.Font = Enum.Font.SourceSansBold
+        editName.Size = UDim2.new(0.5, 0, 0.5, 0); editName.Position = UDim2.new(0.02, 0, 0, 0)
+        editName.Text = name; editName.TextColor3 = Color3.new(1,1,1); editName.BackgroundTransparency = 1; editName.TextXAlignment = 0
 
         local info = Instance.new("TextLabel", Frame)
-        info.Size = UDim2.new(0.6, 0, 0.5, 0); info.Position = UDim2.new(0.02, 0, 0.5, 0)
-        info.Text = coords; info.TextColor3 = Color3.fromRGB(255, 80, 80); info.BackgroundTransparency = 1; info.TextXAlignment = Enum.TextXAlignment.Left; info.TextSize = 10
+        info.Size = UDim2.new(0.5, 0, 0.5, 0); info.Position = UDim2.new(0.02, 0, 0.5, 0)
+        info.Text = coords; info.TextColor3 = Color3.fromRGB(255, 80, 80); info.BackgroundTransparency = 1; info.TextXAlignment = 0; info.TextSize = 10
         
+        -- КНОПКА ПЛЮС ДЛЯ ВИДЖЕТА
+        local addW = Instance.new("TextButton", Frame)
+        addW.Size = UDim2.new(0, 25, 0, 25); addW.Position = UDim2.new(0.55, 0, 0.3, 0)
+        addW.BackgroundColor3 = Color3.fromRGB(80, 80, 80); addW.Text = "+"; addW.TextColor3 = Color3.new(1,1,1)
+
         local tpBtn = Instance.new("TextButton", Frame)
-        tpBtn.Size = UDim2.new(0.3, 0, 0.4, 0); tpBtn.Position = UDim2.new(0.65, 0, 0.08, 0)
+        tpBtn.Size = UDim2.new(0.3, 0, 0.4, 0); tpBtn.Position = UDim2.new(0.68, 0, 0.08, 0)
         tpBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 0); tpBtn.Text = "go"
         
         local delBtn = Instance.new("TextButton", Frame)
-        delBtn.Size = UDim2.new(0.3, 0, 0.4, 0); delBtn.Position = UDim2.new(0.65, 0, 0.52, 0)
+        delBtn.Size = UDim2.new(0.3, 0, 0.4, 0); delBtn.Position = UDim2.new(0.68, 0, 0.52, 0)
         delBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0); delBtn.Text = "delete"
 
-        editName.FocusLost:Connect(function(enter)
-            if enter and editName.Text ~= "" and editName.Text ~= name then
-                local n = editName.Text
-                locations[n] = coords; locations[name] = nil
-                save(locations); updateSavedUI(); refreshBeacons()
-            else editName.Text = name end
-        end)
+        local function parse(c)
+            local t = {} for s in c:gmatch("[^,]+") do table.insert(t, tonumber(s)) end
+            return Vector3.new(t[1], t[2], t[3])
+        end
 
-        tpBtn.MouseButton1Click:Connect(function()
-            local t = {} for s in coords:gmatch("[^,]+") do table.insert(t, tonumber(s)) end
-            flyTo(Vector3.new(t[1], t[2], t[3]))
-        end)
-        delBtn.MouseButton1Click:Connect(function()
-            locations[name] = nil; save(locations); updateSavedUI(); refreshBeacons()
-        end)
+        addW.MouseButton1Click:Connect(function() createQuickButton(name, parse(coords)) end)
+        tpBtn.MouseButton1Click:Connect(function() flyTo(parse(coords)) end)
+        delBtn.MouseButton1Click:Connect(function() locations[name] = nil; save(locations); updateSavedUI(); refreshBeacons() end)
     end
     Scroll.CanvasSize = UDim2.new(0, 0, 0, Layout.AbsoluteContentSize.Y + 20)
 end
 
 bThis.MouseButton1Click:Connect(function()
-    local p = LP.Character.HumanoidRootPart.Position
-    locations["Point_" .. os.date("%H%M%S")] = math.floor(p.X)..","..math.floor(p.Y)..","..math.floor(p.Z)
-    save(locations); updateSavedUI(); refreshBeacons()
+    local r = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if r then
+        locations["Point_" .. os.date("%H%M%S")] = math.floor(r.Position.X)..","..math.floor(r.Position.Y)..","..math.floor(r.Position.Z)
+        save(locations); updateSavedUI(); refreshBeacons()
+    end
 end)
 
 bSave.MouseButton1Click:Connect(function()
